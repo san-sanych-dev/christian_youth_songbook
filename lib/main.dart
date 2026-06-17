@@ -1,10 +1,26 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Управляем системными панелями вручную, чтобы задавать цвет плашки навигации.
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
+      overlays: SystemUiOverlay.values);
   runApp(const SbornikApp());
+}
+
+/// Стиль системной панели навигации в зависимости от яркости темы.
+SystemUiOverlayStyle _navBarStyle(Brightness brightness) {
+  final isDark = brightness == Brightness.dark;
+  final color = isDark ? Colors.black : Colors.white;
+  return SystemUiOverlayStyle(
+    systemNavigationBarColor: color,
+    systemNavigationBarDividerColor: color,
+    systemNavigationBarIconBrightness:
+        isDark ? Brightness.light : Brightness.dark,
+  );
 }
 
 class Song {
@@ -153,6 +169,12 @@ class _SbornikAppState extends State<SbornikApp> {
           brightness: Brightness.dark,
         ),
       ),
+      builder: (context, child) {
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: _navBarStyle(Theme.of(context).brightness),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: HomePage(onToggleTheme: _toggleTheme),
     );
   }
@@ -226,7 +248,9 @@ class _HomePageState extends State<HomePage> {
           final songs = snapshot.data ?? const <Song>[];
           final filtered = _filter(songs);
 
-          return Column(
+          return SafeArea(
+            top: false,
+            child: Column(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
@@ -270,7 +294,10 @@ class _HomePageState extends State<HomePage> {
                         onTap: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) => SongPage(song: song),
+                              builder: (_) => SongPage(
+                                songs: filtered,
+                                initialIndex: index,
+                              ),
                             ),
                           );
                         },
@@ -279,6 +306,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
             ],
+            ),
           );
         },
       ),
@@ -316,9 +344,14 @@ class SongListTile extends StatelessWidget {
 }
 
 class SongPage extends StatefulWidget {
-  const SongPage({super.key, required this.song});
+  const SongPage({
+    super.key,
+    required this.songs,
+    required this.initialIndex,
+  });
 
-  final Song song;
+  final List<Song> songs;
+  final int initialIndex;
 
   @override
   State<SongPage> createState() => _SongPageState();
@@ -328,7 +361,21 @@ class _SongPageState extends State<SongPage> {
   static const double _minFontSize = 14;
   static const double _maxFontSize = 34;
   double _fontSize = 18;
-  int _transpose = 0;
+  late final PageController _controller;
+  late int _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex;
+    _controller = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   void _changeFontSize(double delta) {
     setState(() {
@@ -336,20 +383,9 @@ class _SongPageState extends State<SongPage> {
     });
   }
 
-  void _changeTranspose(int delta) {
-    setState(() {
-      _transpose = (_transpose + delta).clamp(-11, 11);
-    });
-  }
-
-  void _resetTranspose() {
-    if (_transpose != 0) setState(() => _transpose = 0);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final song = widget.song;
-    final scheme = Theme.of(context).colorScheme;
+    final song = widget.songs[_index];
 
     return Scaffold(
       appBar: AppBar(
@@ -372,94 +408,137 @@ class _SongPageState extends State<SongPage> {
         ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        child: PageView.builder(
+          controller: _controller,
+          itemCount: widget.songs.length,
+          onPageChanged: (i) => setState(() => _index = i),
+          itemBuilder: (context, i) {
+            return _SongView(
+              song: widget.songs[i],
+              fontSize: _fontSize,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _SongView extends StatefulWidget {
+  const _SongView({required this.song, required this.fontSize});
+
+  final Song song;
+  final double fontSize;
+
+  @override
+  State<_SongView> createState() => _SongViewState();
+}
+
+class _SongViewState extends State<_SongView> {
+  int _transpose = 0;
+
+  void _changeTranspose(int delta) {
+    setState(() {
+      _transpose = (_transpose + delta).clamp(-11, 11);
+    });
+  }
+
+  void _resetTranspose() {
+    if (_transpose != 0) setState(() => _transpose = 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final song = widget.song;
+    final fontSize = widget.fontSize;
+    final scheme = Theme.of(context).colorScheme;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: scheme.primary,
-                    foregroundColor: scheme.onPrimary,
-                    child: Text(
-                      '${song.number}',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      song.title,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              if (song.accords.isNotEmpty) ...[
-                Row(
-                  children: [
-                    _SectionLabel(
-                      icon: Icons.music_note,
-                      label: 'Аккорды',
-                      color: scheme.secondary,
-                    ),
-                    const Spacer(),
-                    _TransposeControls(
-                      value: _transpose,
-                      onChange: _changeTranspose,
-                      onReset: _resetTranspose,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: scheme.secondaryContainer,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: SelectableText(
-                    transposeAccords(song.accords, _transpose),
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: _fontSize,
-                      height: 1.5,
-                      fontWeight: FontWeight.w600,
-                      color: scheme.onSecondaryContainer,
-                    ),
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: scheme.primary,
+                foregroundColor: scheme.onPrimary,
+                child: Text(
+                  '${song.number}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 20),
-              ],
-              _SectionLabel(
-                icon: Icons.lyrics_outlined,
-                label: 'Текст',
-                color: scheme.primary,
               ),
-              const SizedBox(height: 8),
-              SelectableText.rich(
-                TextSpan(
-                  style: TextStyle(
-                    fontSize: _fontSize,
-                    height: 1.6,
-                    color: Theme.of(context).textTheme.bodyLarge?.color,
-                  ),
-                  children: buildBoldSpans(song.content),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  song.title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 16),
+          if (song.accords.isNotEmpty) ...[
+            Row(
+              children: [
+                _SectionLabel(
+                  icon: Icons.music_note,
+                  label: 'Аккорды',
+                  color: scheme.secondary,
+                ),
+                const Spacer(),
+                _TransposeControls(
+                  value: _transpose,
+                  onChange: _changeTranspose,
+                  onReset: _resetTranspose,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: scheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: SelectableText(
+                transposeAccords(song.accords, _transpose),
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: fontSize,
+                  height: 1.5,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+          _SectionLabel(
+            icon: Icons.lyrics_outlined,
+            label: 'Текст',
+            color: scheme.primary,
+          ),
+          const SizedBox(height: 8),
+          SelectableText.rich(
+            TextSpan(
+              style: TextStyle(
+                fontSize: fontSize,
+                height: 1.6,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
+              ),
+              children: buildBoldSpans(song.content),
+            ),
+          ),
+        ],
       ),
     );
   }
