@@ -5,8 +5,9 @@ Document layout (discovered by inspection):
   * Each table has a single row with two cells:
       - cell 0 -> lyrics (the `content`)
       - cell 1 -> chords (the `accords`)
-  * Bold runs in the lyrics mark refrains/choruses and must be preserved.
-    They are encoded with Markdown `**bold**` markers in `content`.
+  * Bold and italic runs in the lyrics mark refrains/choruses and emphasised
+    lines and must be preserved. They are encoded with Markdown markers in
+    `content`: `**bold**`, `*italic*` and `***bold italic***`.
   * Empty paragraphs between verses are kept as blank lines.
 
 Song numbering starts at 2 (first song -> number 2).
@@ -26,66 +27,88 @@ OUTPUTS = [Path("songs.json"), Path("assets/songs.json")]
 START_NUMBER = 2
 
 
-def run_is_bold(run: ET.Element) -> bool:
-    rpr = run.find(f"{W}rPr")
+def _toggle_on(rpr: ET.Element | None, tag: str) -> bool:
     if rpr is None:
         return False
-    b = rpr.find(f"{W}b")
-    if b is None:
+    node = rpr.find(f"{W}{tag}")
+    if node is None:
         return False
-    return b.get(f"{W}val") not in ("0", "false", "none")
+    return node.get(f"{W}val") not in ("0", "false", "none")
 
 
-def paragraph_lines(paragraph: ET.Element) -> list[list[tuple[str, bool]]]:
+def run_style(run: ET.Element) -> tuple[bool, bool]:
+    """Return the (bold, italic) state of a run."""
+    rpr = run.find(f"{W}rPr")
+    return _toggle_on(rpr, "b"), _toggle_on(rpr, "i")
+
+
+def paragraph_lines(paragraph: ET.Element) -> list[list[tuple[str, bool, bool]]]:
     """Return the visual lines of a paragraph.
 
     A paragraph may hold several lines when it contains `<w:br/>` breaks.
-    Each line is a list of (text, bold) segments.
+    Each line is a list of (text, bold, italic) segments.
     """
-    lines: list[list[tuple[str, bool]]] = [[]]
+    lines: list[list[tuple[str, bool, bool]]] = [[]]
     for run in paragraph.findall(f"{W}r"):
-        bold = run_is_bold(run)
+        bold, italic = run_style(run)
         for node in run:
             tag = node.tag
             if tag == f"{W}t":
-                lines[-1].append((node.text or "", bold))
+                lines[-1].append((node.text or "", bold, italic))
             elif tag == f"{W}tab":
-                lines[-1].append(("\t", bold))
+                lines[-1].append(("\t", bold, italic))
             elif tag in (f"{W}br", f"{W}cr"):
                 lines.append([])
     return lines
 
 
-def segments_to_markdown(segments: list[tuple[str, bool]]) -> str:
-    """Render (text, bold) segments to a Markdown string.
+def _marker(bold: bool, italic: bool) -> str:
+    if bold and italic:
+        return "***"
+    if bold:
+        return "**"
+    if italic:
+        return "*"
+    return ""
 
-    Bold spans are wrapped with `**` markers, with surrounding whitespace
-    moved outside the markers so the Markdown stays valid.
+
+def segments_to_markdown(segments: list[tuple[str, bool, bool]]) -> str:
+    """Render (text, bold, italic) segments to a Markdown string.
+
+    Emphasised spans are wrapped with Markdown markers (`**bold**`, `*italic*`,
+    `***bold italic***`), with surrounding whitespace moved outside the markers
+    so the Markdown stays valid.
     """
-    chars: list[tuple[str, bool]] = []
-    for text, bold in segments:
+    chars: list[tuple[str, bool, bool]] = []
+    for text, bold, italic in segments:
         for ch in text:
-            chars.append((ch, bold))
+            chars.append((ch, bold, italic))
 
     out: list[str] = []
     i = 0
     n = len(chars)
     while i < n:
-        if not chars[i][1]:
+        bold, italic = chars[i][1], chars[i][2]
+        marker = _marker(bold, italic)
+        if not marker:
             out.append(chars[i][0])
             i += 1
             continue
         j = i
-        while j < n and chars[j][1]:
+        while j < n and chars[j][1] == bold and chars[j][2] == italic:
             j += 1
-        span = "".join(ch for ch, _ in chars[i:j])
+        span = "".join(ch for ch, _, _ in chars[i:j])
         lead = span[: len(span) - len(span.lstrip())]
         trail = span[len(span.rstrip()):]
         core = span.strip()
-        out.append(f"{lead}**{core}**{trail}" if core else span)
+        out.append(f"{lead}{marker}{core}{marker}{trail}" if core else span)
         i = j
-    # Merge bold spans separated only by whitespace: `**a** **b**` -> `**a b**`.
-    merged = re.sub(r"\*\*(\s+)\*\*", r"\1", "".join(out))
+    merged = "".join(out)
+    # Merge spans of the same kind separated only by whitespace, e.g.
+    # `**a** **b**` -> `**a b**`. Longer markers first to avoid mismatches.
+    merged = re.sub(r"\*\*\*(\s+)\*\*\*", r"\1", merged)
+    merged = re.sub(r"(?<!\*)\*\*(\s+)\*\*(?!\*)", r"\1", merged)
+    merged = re.sub(r"(?<!\*)\*(\s+)\*(?!\*)", r"\1", merged)
     return merged.strip()
 
 
@@ -96,7 +119,7 @@ def cell_lines(cell: ET.Element, *, with_bold: bool) -> list[str]:
             if with_bold:
                 lines.append(segments_to_markdown(segments))
             else:
-                lines.append("".join(text for text, _ in segments).strip())
+                lines.append("".join(text for text, _, _ in segments).strip())
     return lines
 
 
@@ -121,7 +144,7 @@ def collapse_blank_runs(lines: list[str]) -> list[str]:
 
 
 def strip_markers(text: str) -> str:
-    return text.replace("**", "")
+    return text.replace("*", "")
 
 
 def first_nonempty(lines: list[str]) -> str:

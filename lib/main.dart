@@ -49,15 +49,15 @@ class Song {
   String get title {
     if (name.isNotEmpty) return name;
     for (final line in content.split('\n')) {
-      final trimmed = stripBold(line).trim();
+      final trimmed = stripMarkers(line).trim();
       if (trimmed.isNotEmpty) return trimmed;
     }
     return 'Песня №$number';
   }
 }
 
-/// Убирает Markdown-маркеры жирного текста (`**`).
-String stripBold(String text) => text.replaceAll('**', '');
+/// Убирает Markdown-маркеры выделения (`*`, `**`, `***`).
+String stripMarkers(String text) => text.replaceAll('*', '');
 
 /// Названия нот для вывода (немецкая нотация: `B` = си-бемоль, `H` = си).
 const List<String> _noteNames = [
@@ -101,21 +101,42 @@ String transposeAccords(String text, int semitones) {
   });
 }
 
-/// Разбирает строку с Markdown-маркерами `**жирный**` на спаны TextSpan.
-List<TextSpan> buildBoldSpans(String text, {TextStyle? boldStyle}) {
+/// Разбирает строку с Markdown-маркерами выделения на спаны TextSpan.
+///
+/// Поддерживаются `***жирный курсив***`, `**жирный**` и `*курсив*`.
+List<TextSpan> buildBoldSpans(String text) {
   final spans = <TextSpan>[];
-  final pattern = RegExp(r'\*\*(.+?)\*\*');
+  final pattern = RegExp(r'\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*');
   var index = 0;
   for (final match in pattern.allMatches(text)) {
     if (match.start > index) {
       spans.add(TextSpan(text: text.substring(index, match.start)));
     }
-    spans.add(
-      TextSpan(
-        text: match.group(1),
-        style: boldStyle ?? const TextStyle(fontWeight: FontWeight.bold),
-      ),
-    );
+    if (match.group(1) != null) {
+      spans.add(
+        TextSpan(
+          text: match.group(1),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      );
+    } else if (match.group(2) != null) {
+      spans.add(
+        TextSpan(
+          text: match.group(2),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      );
+    } else {
+      spans.add(
+        TextSpan(
+          text: match.group(3),
+          style: const TextStyle(fontStyle: FontStyle.italic),
+        ),
+      );
+    }
     index = match.end;
   }
   if (index < text.length) {
@@ -212,7 +233,7 @@ class _HomePageState extends State<HomePage> {
     return songs.where((song) {
       if (song.number.toString() == query) return true;
       if (song.number.toString().startsWith(query)) return true;
-      return stripBold(song.content).toLowerCase().contains(query) ||
+      return stripMarkers(song.content).toLowerCase().contains(query) ||
           song.title.toLowerCase().contains(query);
     }).toList();
   }
