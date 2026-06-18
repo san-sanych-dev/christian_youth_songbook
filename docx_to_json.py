@@ -147,10 +147,24 @@ def strip_markers(text: str) -> str:
     return text.replace("*", "")
 
 
+def clean_name(text: str) -> str:
+    """Build a song title from a content line.
+
+    Drops Markdown markers, `//` repeat brackets and `2х`/`3x` repeat counters,
+    collapses whitespace and trims trailing punctuation.
+    """
+    text = strip_markers(text)
+    text = text.replace("//", " ")
+    text = re.sub(r"\b\d+\s*[хx]\b", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[\s,.;:!?\-–—]+$", "", text).strip()
+    return text
+
+
 def first_nonempty(lines: list[str]) -> str:
     for line in lines:
         if line.strip():
-            return strip_markers(line).strip()
+            return clean_name(line)
     return ""
 
 
@@ -165,9 +179,9 @@ def parse() -> list[dict[str, object]]:
         content_lines = collapse_blank_runs(
             trim_blank_edges(cell_lines(cells[0], with_bold=True))
         )
-        accord_lines = [
-            line for line in cell_lines(cells[1], with_bold=False) if line.strip()
-        ]
+        accord_lines = collapse_blank_runs(
+            trim_blank_edges(cell_lines(cells[1], with_bold=False))
+        )
 
         songs.append(
             {
