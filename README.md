@@ -1,17 +1,50 @@
-# sbornik
+# Сборник песен (PWA)
 
-A new Flutter project.
+Прогрессивное веб-приложение (PWA) со сборником христианских песен: поиск по
+номеру и тексту, отображение аккордов с транспонированием, регулировка размера
+шрифта и светлая/тёмная тема.
 
-## Getting Started
+Приложение собрано на Flutter Web и работает офлайн после первого открытия,
+устанавливается на домашний экран телефона и рабочий стол.
 
-This project is a starting point for a Flutter application.
+## Требования
 
-A few resources to get you started if this is your first Flutter project:
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (stable)
+- Включённая поддержка web: `flutter config --enable-web`
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Запуск в режиме разработки
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter pub get
+flutter run -d chrome
+```
+
+## Сборка PWA
+
+```bash
+flutter build web --release
+```
+
+Готовые файлы появятся в `build/web/`. Эту папку нужно раздавать любым статическим
+сервером (Nginx, GitHub Pages, Netlify, Vercel и т.п.).
+
+Если приложение размещается не в корне домена, укажите базовый путь:
+
+```bash
+flutter build web --release --base-href /sbornik/
+```
+
+## Локальная проверка собранной версии
+
+```bash
+cd build/web
+python3 -m http.server 8080
+```
+
+Затем открыть `http://localhost:8080`. Service worker и манифест уже настроены,
+поэтому Chrome предложит установить приложение.
+
+## Данные песен
+
+Тексты песен хранятся в `assets/songs.json`. Скрипты `docx_to_json.py` и
+`parse_sbornik.py` помогают конвертировать исходный `.docx` в этот JSON.
