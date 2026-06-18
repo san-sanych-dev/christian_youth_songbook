@@ -2,13 +2,68 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Управляем системными панелями вручную, чтобы задавать цвет плашки навигации.
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
       overlays: SystemUiOverlay.values);
+  await Settings.instance.init();
   runApp(const SbornikApp());
+}
+
+/// Хранилище пользовательских настроек поверх [SharedPreferences].
+///
+/// Сохраняет тему, размер шрифта и транспонирование (для каждой песни своё),
+/// чтобы настройки переживали перезапуск приложения.
+class Settings {
+  Settings._();
+
+  static final Settings instance = Settings._();
+
+  static const _kThemeMode = 'theme_mode';
+  static const _kFontSize = 'font_size';
+  static const _kTransposePrefix = 'transpose_';
+
+  late final SharedPreferences _prefs;
+
+  Future<void> init() async {
+    _prefs = await SharedPreferences.getInstance();
+  }
+
+  ThemeMode get themeMode {
+    switch (_prefs.getString(_kThemeMode)) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
+    }
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    await _prefs.setString(_kThemeMode, mode.name);
+  }
+
+  double? get fontSize => _prefs.getDouble(_kFontSize);
+
+  Future<void> setFontSize(double value) async {
+    await _prefs.setDouble(_kFontSize, value);
+  }
+
+  int transposeFor(int songNumber) =>
+      _prefs.getInt('$_kTransposePrefix$songNumber') ?? 0;
+
+  Future<void> setTransposeFor(int songNumber, int value) async {
+    final key = '$_kTransposePrefix$songNumber';
+    if (value == 0) {
+      await _prefs.remove(key);
+    } else {
+      await _prefs.setInt(key, value);
+    }
+  }
 }
 
 /// Стиль системной панели навигации в зависимости от яркости темы.
@@ -163,13 +218,14 @@ class SbornikApp extends StatefulWidget {
 }
 
 class _SbornikAppState extends State<SbornikApp> {
-  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode _themeMode = Settings.instance.themeMode;
 
   void _toggleTheme() {
     setState(() {
       _themeMode =
           _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
     });
+    Settings.instance.setThemeMode(_themeMode);
   }
 
   @override
@@ -381,7 +437,7 @@ class SongPage extends StatefulWidget {
 class _SongPageState extends State<SongPage> {
   static const double _minFontSize = 14;
   static const double _maxFontSize = 34;
-  double _fontSize = 18;
+  double _fontSize = Settings.instance.fontSize ?? 18;
   late final PageController _controller;
   late int _index;
 
@@ -402,6 +458,7 @@ class _SongPageState extends State<SongPage> {
     setState(() {
       _fontSize = (_fontSize + delta).clamp(_minFontSize, _maxFontSize);
     });
+    Settings.instance.setFontSize(_fontSize);
   }
 
   @override
@@ -456,16 +513,20 @@ class _SongView extends StatefulWidget {
 }
 
 class _SongViewState extends State<_SongView> {
-  int _transpose = 0;
+  late int _transpose = Settings.instance.transposeFor(widget.song.number);
 
   void _changeTranspose(int delta) {
     setState(() {
       _transpose = (_transpose + delta).clamp(-11, 11);
     });
+    Settings.instance.setTransposeFor(widget.song.number, _transpose);
   }
 
   void _resetTranspose() {
-    if (_transpose != 0) setState(() => _transpose = 0);
+    if (_transpose != 0) {
+      setState(() => _transpose = 0);
+      Settings.instance.setTransposeFor(widget.song.number, 0);
+    }
   }
 
   @override
