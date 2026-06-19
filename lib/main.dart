@@ -15,8 +15,8 @@ Future<void> main() async {
 
 /// Хранилище пользовательских настроек поверх [SharedPreferences].
 ///
-/// Сохраняет тему, размер шрифта и транспонирование (для каждой песни своё),
-/// чтобы настройки переживали перезапуск приложения.
+/// Сохраняет тему, размер шрифта, свёрнутость аккордов и транспонирование
+/// (для каждой песни своё), чтобы настройки переживали перезапуск приложения.
 class Settings {
   Settings._();
 
@@ -24,6 +24,7 @@ class Settings {
 
   static const _kThemeMode = 'theme_mode';
   static const _kFontSize = 'font_size';
+  static const _kChordsCollapsed = 'chords_collapsed';
   static const _kTransposePrefix = 'transpose_';
 
   late final SharedPreferences _prefs;
@@ -51,6 +52,12 @@ class Settings {
 
   Future<void> setFontSize(double value) async {
     await _prefs.setDouble(_kFontSize, value);
+  }
+
+  bool get chordsCollapsed => _prefs.getBool(_kChordsCollapsed) ?? false;
+
+  Future<void> setChordsCollapsed(bool value) async {
+    await _prefs.setBool(_kChordsCollapsed, value);
   }
 
   int transposeFor(int songNumber) =>
@@ -438,6 +445,7 @@ class _SongPageState extends State<SongPage> {
   static const double _minFontSize = 14;
   static const double _maxFontSize = 34;
   double _fontSize = Settings.instance.fontSize ?? 18;
+  bool _chordsCollapsed = Settings.instance.chordsCollapsed;
   late final PageController _controller;
   late int _index;
 
@@ -459,6 +467,11 @@ class _SongPageState extends State<SongPage> {
       _fontSize = (_fontSize + delta).clamp(_minFontSize, _maxFontSize);
     });
     Settings.instance.setFontSize(_fontSize);
+  }
+
+  void _toggleChords() {
+    setState(() => _chordsCollapsed = !_chordsCollapsed);
+    Settings.instance.setChordsCollapsed(_chordsCollapsed);
   }
 
   @override
@@ -494,6 +507,8 @@ class _SongPageState extends State<SongPage> {
             return _SongView(
               song: widget.songs[i],
               fontSize: _fontSize,
+              chordsCollapsed: _chordsCollapsed,
+              onToggleChords: _toggleChords,
             );
           },
         ),
@@ -503,10 +518,17 @@ class _SongPageState extends State<SongPage> {
 }
 
 class _SongView extends StatefulWidget {
-  const _SongView({required this.song, required this.fontSize});
+  const _SongView({
+    required this.song,
+    required this.fontSize,
+    required this.chordsCollapsed,
+    required this.onToggleChords,
+  });
 
   final Song song;
   final double fontSize;
+  final bool chordsCollapsed;
+  final VoidCallback onToggleChords;
 
   @override
   State<_SongView> createState() => _SongViewState();
@@ -570,46 +592,50 @@ class _SongViewState extends State<_SongView> {
           if (song.accords.isNotEmpty) ...[
             Row(
               children: [
-                _SectionLabel(
-                  icon: Icons.music_note,
-                  label: 'Аккорды',
+                _ChordsToggle(
+                  collapsed: widget.chordsCollapsed,
                   color: scheme.secondary,
+                  onTap: widget.onToggleChords,
                 ),
                 const Spacer(),
-                _TransposeControls(
-                  value: _transpose,
-                  onChange: _changeTranspose,
-                  onReset: _resetTranspose,
-                ),
+                if (!widget.chordsCollapsed)
+                  _TransposeControls(
+                    value: _transpose,
+                    onChange: _changeTranspose,
+                    onReset: _resetTranspose,
+                  ),
               ],
             ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: scheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: SelectableText(
-                transposeAccords(song.accords, _transpose),
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: fontSize,
-                  height: 1.5,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSecondaryContainer,
-                ),
-              ),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              alignment: Alignment.topCenter,
+              child: widget.chordsCollapsed
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 20),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: scheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: SelectableText(
+                          transposeAccords(song.accords, _transpose),
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: fontSize,
+                            height: 1.5,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSecondaryContainer,
+                          ),
+                        ),
+                      ),
+                    ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
           ],
-          _SectionLabel(
-            icon: Icons.lyrics_outlined,
-            label: 'Текст',
-            color: scheme.primary,
-          ),
-          const SizedBox(height: 8),
           SelectableText.rich(
             TextSpan(
               style: TextStyle(
@@ -690,33 +716,51 @@ class _TransposeControls extends StatelessWidget {
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({
-    required this.icon,
-    required this.label,
+/// Кнопка-переключатель видимости блока аккордов.
+class _ChordsToggle extends StatelessWidget {
+  const _ChordsToggle({
+    required this.collapsed,
     required this.color,
+    required this.onTap,
   });
 
-  final IconData icon;
-  final String label;
+  final bool collapsed;
   final Color color;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(width: 6),
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.1,
-            fontSize: 12,
+    return InkWell(
+      borderRadius: BorderRadius.circular(24),
+      onTap: onTap,
+      child: Tooltip(
+        message: collapsed ? 'Показать аккорды' : 'Скрыть аккорды',
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.music_note, size: 18, color: color),
+              const SizedBox(width: 6),
+              Text(
+                'АККОРДЫ',
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.1,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                collapsed ? Icons.expand_more : Icons.expand_less,
+                size: 18,
+                color: color,
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
